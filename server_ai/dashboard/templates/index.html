@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard Kendali AC & Pencahayaan</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <!-- ══ HEADER ══════════════════════════════════════════════════════════════ -->
+  <header>
+    <div class="header-left">
+      <h1>Sistem Kendali Cerdas AC &amp; Pencahayaan</h1>
+      <p class="subtitle">Ruang Kuliah &mdash; Berbasis YOLOv8 + ESP32</p>
+    </div>
+    <div class="header-right">
+      <span id="mode-badge" class="badge badge--akuisisi">AKUISISI</span>
+      <span id="fps-label" class="fps-label">0.0 FPS</span>
+    </div>
+  </header>
+
+  <!-- ══ MAIN GRID ═══════════════════════════════════════════════════════════ -->
+  <main class="grid">
+
+    <!-- ── Panel Kiri: Video Feed ── -->
+    <section class="panel panel--video">
+      <h2>Live Feed</h2>
+      <div class="video-wrapper">
+        <img id="video-feed" src="/video_feed" alt="Live Feed" />
+        <div id="video-overlay" class="video-overlay">
+          <span>Menunggu frame...</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Panel Kanan ── -->
+    <aside class="panel-group">
+
+      <!-- Statistik Orang -->
+      <section class="panel panel--stats">
+        <h2>Deteksi Orang</h2>
+        <div class="stats-grid">
+          <div class="stat-card stat-card--total">
+            <div class="stat-value" id="total-persons">0</div>
+            <div class="stat-label">Total Orang</div>
+          </div>
+          <div class="stat-card stat-card--front">
+            <div class="stat-value" id="zone-front">0</div>
+            <div class="stat-label">Zona Depan</div>
+          </div>
+          <div class="stat-card stat-card--back">
+            <div class="stat-value" id="zone-back">0</div>
+            <div class="stat-label">Zona Belakang</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Status Relay -->
+      <section class="panel panel--relay">
+        <h2>Status Aktuator</h2>
+        <div class="relay-list">
+          <div class="relay-item" id="relay-ac">
+            <div class="relay-icon">&#10052;</div>
+            <div class="relay-info">
+              <div class="relay-name">AC / Pendingin</div>
+              <div class="relay-state relay-off" id="relay-ac-state">OFF</div>
+            </div>
+            <div class="relay-indicator relay-indicator--off" id="relay-ac-dot"></div>
+          </div>
+          <div class="relay-item" id="relay-light-front">
+            <div class="relay-icon">&#128161;</div>
+            <div class="relay-info">
+              <div class="relay-name">Lampu Zona Depan</div>
+              <div class="relay-state relay-off" id="relay-front-state">OFF</div>
+            </div>
+            <div class="relay-indicator relay-indicator--off" id="relay-front-dot"></div>
+          </div>
+          <div class="relay-item" id="relay-light-back">
+            <div class="relay-icon">&#128161;</div>
+            <div class="relay-info">
+              <div class="relay-name">Lampu Zona Belakang</div>
+              <div class="relay-state relay-off" id="relay-back-state">OFF</div>
+            </div>
+            <div class="relay-indicator relay-indicator--off" id="relay-back-dot"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Log Perintah -->
+      <section class="panel panel--log">
+        <h2>Log Perintah <span class="log-count" id="log-count">(0)</span></h2>
+        <div class="log-table-wrapper">
+          <table class="log-table">
+            <thead>
+              <tr>
+                <th>Waktu</th>
+                <th>Aktuator</th>
+                <th>State</th>
+              </tr>
+            </thead>
+            <tbody id="log-body">
+              <tr><td colspan="3" class="log-empty">Belum ada perintah.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+    </aside>
+  </main>
+
+  <script src="/static/script.js"></script>
+</body>
+</html>
