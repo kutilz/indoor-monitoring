@@ -1,9 +1,14 @@
 """
-Logika kendali zoning dan counting.
-Menerima hasil deteksi dari YoloDetector, menghitung jumlah orang
-per zona, lalu mengeluarkan keputusan on/off untuk setiap aktuator.
+Logika kendali: deteksi orang → keputusan AC & lampu → perintah aktuator.
+
+Perubahan dari versi lama:
+  - Lampu disederhanakan jadi 1 relay tunggal (bukan zona depan/belakang)
+  - AC dikontrol via klik servo power (bukan relay on/off)
+  - Server melacak "ac_desired" karena tidak ada feedback fisik dari AC Daikin
+  - Output: get_actuator_commands() menggantikan get_relay_commands()
 """
 
+import threading
 from dataclasses import dataclass, field
 from yolo_detector import Detection
 import config
@@ -11,136 +16,182 @@ import config
 
 @dataclass
 class ControlState:
-    """
-    Representasi state kendali sistem yang dihasilkan setiap frame.
-    State ini dikirim ke MQTT dan ke dashboard.
-    """
+    """State kendali per frame — dikirim ke dashboard via SSE."""
     total_persons: int = 0
-    zone_front: int = 0       # Jumlah orang di zona depan
-    zone_back: int = 0        # Jumlah orang di zona belakang
+    zone_front: int    = 0   # Jumlah orang di zona atas frame (untuk visualisasi)
+    zone_back: int     = 0   # Jumlah orang di zona bawah frame
 
-    ac_on: bool = False
-    light_front_on: bool = False
-    light_back_on: bool = False
+    # Keputusan aktuator (desired state)
+    ac_desired: bool   = False   # True = ingin AC menyala
+    lamp_on: bool      = False   # True = ingin lampu menyala
 
-    # Metadata untuk dashboard & logging
-    frame_width: int = 0
-    frame_height: int = 0
-    zone_split_y: int = 0     # Koordinat piksel Y garis pembagi
+    # Metadata untuk dashboard
+    frame_width: int   = 0
+    frame_height: int  = 0
+    zone_split_y: int  = 0
 
     def to_dict(self) -> dict:
         return {
             "total_persons": self.total_persons,
-            "zone_front": self.zone_front,
-            "zone_back": self.zone_back,
-            "ac_on": self.ac_on,
-            "light_front_on": self.light_front_on,
-            "light_back_on": self.light_back_on,
-            "frame_width": self.frame_width,
-            "frame_height": self.frame_height,
-            "zone_split_y": self.zone_split_y,
+            "zone_front":    self.zone_front,
+            "zone_back":     self.zone_back,
+            "ac_desired":    self.ac_desired,
+            "lamp_on":       self.lamp_on,
+            "frame_width":   self.frame_width,
+            "frame_height":  self.frame_height,
+            "zone_split_y":  self.zone_split_y,
         }
 
 
 class ControlLogic:
     """
-    Menerapkan logika kendali berdasarkan deteksi orang dan konfigurasi zona.
+    Menghasilkan keputusan kendali berdasar jumlah orang terdeteksi.
 
-    Zona ditentukan secara vertikal berdasarkan posisi center-Y bounding box:
-    - Zona DEPAN  : cy < zone_split_y  (bagian atas frame)
-    - Zona BELAKANG: cy >= zone_split_y (bagian bawah frame)
+    AC:
+      - NYALA jika total_persons >= threshold_ac
+      - MATI jika total_persons < threshold_ac
+      - Dikontrol via klik servo power (toggle); server track state yang diinginkan
 
-    Aturan kendali:
-    - AC         : ON jika total_persons >= PERSON_THRESHOLD_AC
-    - Lampu Depan : ON jika ada >= 1 orang di zona depan
-    - Lampu Belakang: ON jika ada >= 1 orang di zona belakang
+    Lampu:
+      - NYALA jika total_persons >= threshold_lamp
+      - MATI jika tidak ada orang
+      - Dikontrol via relay tunggal
+
+    State tracking AC:
+      Server menyimpan "ac_presumed_on" (bool) karena tidak ada feedback fisik
+      dari AC Daikin. Setiap kali state yang diinginkan berubah → klik servo power.
     """
 
     def __init__(self,
                  zone_split_ratio: float = None,
-                 person_threshold_ac: int = None):
-        """
-        Args:
-            zone_split_ratio: 0.0-1.0, rasio tinggi frame untuk pembagi zona.
-            person_threshold_ac: Minimal orang agar AC menyala.
-        """
-        self._zone_split_ratio = zone_split_ratio \
-            if zone_split_ratio is not None \
+                 threshold_ac: int = None,
+                 threshold_lamp: int = None):
+        self._zone_split_ratio = (
+            zone_split_ratio if zone_split_ratio is not None
             else config.ZONE_SPLIT_RATIO
-        self._threshold_ac = person_threshold_ac \
-            if person_threshold_ac is not None \
+        )
+        self._threshold_ac   = (
+            threshold_ac if threshold_ac is not None
             else config.PERSON_THRESHOLD_AC
+        )
+        self._threshold_lamp = (
+            threshold_lamp if threshold_lamp is not None
+            else config.PERSON_THRESHOLD_LAMP
+        )
 
-        self._prev_state = ControlState()
+        self._prev_state    = ControlState()
+        self._ac_presumed   = False   # Apa yang server anggap sebagai state AC fisik
+        self._lock          = threading.Lock()
 
-    def process(self, detections: list[Detection],
+    # ── Parameter update (dari dashboard settings) ────────────────────────────
+
+    def update_params(self,
+                      zone_split_ratio: float = None,
+                      threshold_ac: int = None,
+                      threshold_lamp: int = None):
+        """Update parameter runtime tanpa restart (dipanggil dari API settings)."""
+        with self._lock:
+            if zone_split_ratio is not None:
+                self._zone_split_ratio = zone_split_ratio
+            if threshold_ac is not None:
+                self._threshold_ac = threshold_ac
+            if threshold_lamp is not None:
+                self._threshold_lamp = threshold_lamp
+
+    # ── Proses frame ─────────────────────────────────────────────────────────
+
+    def process(self, detections: list,
                 frame_width: int, frame_height: int) -> ControlState:
         """
-        Hitung state kendali dari hasil deteksi.
+        Hitung state kendali dari hasil deteksi YOLO.
 
         Args:
             detections: List Detection dari YoloDetector.detect()
-            frame_width: Lebar frame dalam piksel
-            frame_height: Tinggi frame dalam piksel
+            frame_width, frame_height: Dimensi frame dalam piksel
 
         Returns:
             ControlState dengan keputusan terbaru.
         """
-        split_y = int(frame_height * self._zone_split_ratio)
+        with self._lock:
+            split_ratio = self._zone_split_ratio
+            thr_ac      = self._threshold_ac
+            thr_lamp    = self._threshold_lamp
 
+        split_y    = int(frame_height * split_ratio)
         zone_front = [d for d in detections if d.cy < split_y]
         zone_back  = [d for d in detections if d.cy >= split_y]
-
-        total = len(detections)
-        n_front = len(zone_front)
-        n_back  = len(zone_back)
+        total      = len(detections)
 
         state = ControlState(
-            total_persons=total,
-            zone_front=n_front,
-            zone_back=n_back,
-            ac_on=(total >= self._threshold_ac),
-            light_front_on=(n_front >= 1),
-            light_back_on=(n_back >= 1),
-            frame_width=frame_width,
-            frame_height=frame_height,
-            zone_split_y=split_y,
+            total_persons = total,
+            zone_front    = len(zone_front),
+            zone_back     = len(zone_back),
+            ac_desired    = (total >= thr_ac),
+            lamp_on       = (total >= thr_lamp),
+            frame_width   = frame_width,
+            frame_height  = frame_height,
+            zone_split_y  = split_y,
         )
         return state
 
-    def get_relay_commands(self,
-                           new_state: ControlState,
-                           old_state: ControlState = None
-                           ) -> list[dict]:
+    # ── Perintah aktuator ─────────────────────────────────────────────────────
+
+    def get_actuator_commands(self,
+                              new_state: ControlState,
+                              old_state: ControlState = None) -> dict:
         """
-        Bandingkan state baru dengan state lama.
-        Return hanya perintah relay yang berubah (menghindari spam MQTT).
+        Bandingkan state baru vs lama, hasilkan daftar perintah yang perlu dieksekusi.
+
+        AC menggunakan pola toggle (klik power sekali untuk nyala/mati).
+        Server melacak "ac_presumed" agar tidak double-klik.
+
+        Lampu pakai relay langsung (no toggle needed).
 
         Returns:
-            List dict: [{"relay": int, "state": "ON"|"OFF"}, ...]
+            {
+                "servo_clicks": [int, ...],   # list servo ID yang harus diklik
+                "relay": "ON" | "OFF" | None  # perintah relay lampu, atau None jika tidak berubah
+            }
         """
         if old_state is None:
             old_state = self._prev_state
 
-        commands = []
+        commands = {
+            "servo_clicks": [],
+            "relay": None,
+            "log_entries": []
+        }
 
-        checks = [
-            (config.RELAY_AC,          old_state.ac_on,
-             new_state.ac_on,          "AC"),
-            (config.RELAY_LIGHT_FRONT, old_state.light_front_on,
-             new_state.light_front_on, "Lampu Depan"),
-            (config.RELAY_LIGHT_BACK,  old_state.light_back_on,
-             new_state.light_back_on,  "Lampu Belakang"),
-        ]
-
-        for relay_num, was_on, is_on, name in checks:
-            if was_on != is_on:
-                state_str = "ON" if is_on else "OFF"
-                commands.append({
-                    "relay": relay_num,
-                    "state": state_str,
-                    "name": name,
+        # ── AC: klik power jika desired state berubah ─────────────────────────
+        if new_state.ac_desired != old_state.ac_desired:
+            # Toggle: apapun state fisik AC, kita klik sekali
+            # (Kita track ac_presumed untuk mencegah double klik jika logic error)
+            if new_state.ac_desired != self._ac_presumed:
+                commands["servo_clicks"].append(config.SERVO_POWER)
+                self._ac_presumed = new_state.ac_desired
+                commands["log_entries"].append({
+                    "actuator": "AC Power",
+                    "action":   "KLIK",
+                    "reason":   "ON" if new_state.ac_desired else "OFF",
                 })
+
+        # ── Lampu: relay langsung, hanya kirim jika berubah ──────────────────
+        if new_state.lamp_on != old_state.lamp_on:
+            commands["relay"] = "ON" if new_state.lamp_on else "OFF"
+            commands["log_entries"].append({
+                "actuator": "Lampu",
+                "action":   "ON" if new_state.lamp_on else "OFF",
+                "reason":   f"{new_state.total_persons} orang",
+            })
 
         self._prev_state = new_state
         return commands
+
+    def force_ac_state(self, desired_on: bool):
+        """
+        Override manual AC dari dashboard.
+        Klik servo power dan update tracking.
+        Dipanggil oleh endpoint /api/ac/power.
+        """
+        self._ac_presumed = desired_on
+        self._prev_state.ac_desired = desired_on

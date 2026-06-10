@@ -1,48 +1,40 @@
-# Sistem Kendali Cerdas AC & Pencahayaan Ruang Kuliah
+# Sistem Kendali Cerdas AC & Lampu Ruang Kuliah
 
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue?logo=python)
 ![YOLOv8](https://img.shields.io/badge/YOLOv8-Ultralytics-purple)
-![ESP32](https://img.shields.io/badge/ESP32-Arduino-teal?logo=arduino)
+![ESP32-CAM](https://img.shields.io/badge/ESP32--CAM-AI%20Thinker-teal?logo=arduino)
+![D1 Mini](https://img.shields.io/badge/D1%20Mini-ESP8266-orange?logo=arduino)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-Sistem kendali otomatis AC dan pencahayaan ruang kuliah berbasis **computer vision (YOLOv8)** dan **IoT (ESP32)**. Sistem mendeteksi keberadaan dan posisi mahasiswa di ruangan menggunakan kamera, lalu secara otomatis menyalakan/mematikan AC dan lampu sesuai zona yang terisi.
+Sistem kendali otomatis AC dan lampu berbasis **computer vision (YOLOv8)** dan **IoT (ESP32)**. Kamera mendeteksi keberadaan orang, lalu:
 
----
-
-## Daftar Isi
-
-- [Arsitektur Sistem](#arsitektur-sistem)
-- [Hardware yang Dibutuhkan](#hardware-yang-dibutuhkan)
-- [Struktur Folder](#struktur-folder)
-- [Quick Start — Mode Akuisisi (Tanpa Hardware)](#quick-start--mode-akuisisi-tanpa-hardware)
-- [Quick Start — Mode Real (Dengan Hardware)](#quick-start--mode-real-dengan-hardware)
-- [Panduan Wiring Hardware](#panduan-wiring-hardware)
-- [Konfigurasi](#konfigurasi)
-- [Perintah CLI Lengkap](#perintah-cli-lengkap)
+- AC **diklik mati/hidup** otomatis via servo SG90 yang dijepit ke remote Daikin Cassette
+- Lampu **dinyalakan/dimatikan** via relay
+- Suhu & kelembaban ruangan dipantau via DHT22
+- **Semua bisa dikalibrasi dan dikonfigurasi lewat dashboard web — tanpa edit kode**
 
 ---
 
 ## Arsitektur Sistem
 
 ```
-┌─────────────────────┐     HTTP MJPEG     ┌──────────────────────────────────┐
-│  ESP32-CAM          │ ─────────────────► │  Python Server (PC/Laptop)       │
-│  (OV2640 Camera)    │                    │                                  │
-└─────────────────────┘                    │  ┌──────────────┐                │
-                                           │  │ YOLOv8       │ Deteksi person │
-┌─────────────────────┐                    │  └──────┬───────┘                │
-│  Mosquitto MQTT     │ ◄── MQTT Publish ──│         │                        │
-│  Broker             │                    │  ┌──────▼───────┐                │
-└────────┬────────────┘                    │  │ Control Logic│ Zoning & Count │
-         │ MQTT Subscribe                  │  └──────┬───────┘                │
-         ▼                                 │         │                        │
-┌─────────────────────┐                    │  ┌──────▼───────┐                │
-│  ESP32 + Relay 4CH  │                    │  │ Dashboard    │ http://...5000 │
-│  (GPIO 12/13/14/15) │                    │  └──────────────┘                │
-│  ├─ Relay 1: AC     │                    └──────────────────────────────────┘
-│  ├─ Relay 2: Lampu  │
-│  └─ Relay 3: Lampu  │
-└─────────────────────┘
+┌──────────────────────┐  HTTP MJPEG   ┌────────────────────────────────────────────┐
+│  Node 1: ESP32-CAM   │ ────────────► │  Laptop / PC (Python Server)               │
+│  AI Thinker          │               │                                            │
+└──────────────────────┘               │  ┌──────────┐  ┌────────────┐             │
+                                       │  │ YOLOv8   │  │ControlLogic│             │
+┌──────────────────────┐  HTTP REST    │  └────┬─────┘  └─────┬──────┘             │
+│  Node 2: D1 Mini /   │ ◄──────────── │       └──────┬────────┘                   │
+│  ESP32 (Aktuator)    │               │              │                            │
+│                      │  HTTP GET     │  ┌───────────▼──────────────────────────┐ │
+│  ├─ Servo 0: Power   │ ────────────► │  │ Flask Dashboard (port 5000)          │ │
+│  ├─ Servo 1: Temp+   │               │  │  • Monitor: deteksi, status, log      │ │
+│  ├─ Servo 2: Temp−   │               │  │  • Kalibrasi Servo: slider, test klik │ │
+│  ├─ Relay: Lampu     │               │  │  • Settings: YOLO, threshold, zone    │ │
+│  └─ DHT22            │               │  └──────────────────────────────────────┘ │
+└──────────────────────┘               └────────────────────────────────────────────┘
+
+Tidak ada MQTT broker — komunikasi via HTTP langsung.
 ```
 
 ---
@@ -51,11 +43,35 @@ Sistem kendali otomatis AC dan pencahayaan ruang kuliah berbasis **computer visi
 
 | Komponen | Spesifikasi | Jumlah |
 |----------|-------------|--------|
-| ESP32-CAM | AI-Thinker, modul kamera OV2640 | 1 |
-| ESP32 Dev Board | Untuk kontrol relay (bukan CAM) | 1 |
-| Modul Relay 4-Channel | 5V coil, AC 220V/10A | 1 |
-| Adaptor Power | 5V/2A untuk ESP32-CAM | 1 |
-| PC/Laptop | CPU untuk inferensi YOLOv8 | 1 |
+| ESP32-CAM | AI Thinker, kamera OV2640 | 1 |
+| Adaptor 5V | Untuk power ESP32-CAM langsung (bukan USB programmer) | 1 |
+| **Wemos D1 Mini** | ESP8266-based (cukup dari segi pin — lihat catatan di bawah) | 1 |
+| **atau ESP32 Dev Board** | **Lebih disarankan** untuk stabilitas PWM servo (lihat catatan) | 1 |
+| Servo SG90 | 180°, torsi 1.8 kg·cm | 3 |
+| Modul Relay 1-Channel | 5V coil, beban AC 220V/10A | 1 |
+| Sensor DHT22 | Suhu & kelembaban | 1 |
+| Resistor 10kΩ | Pull-up untuk data DHT22 | 1 |
+| Power Supply Servo | **5V/2A eksternal terpisah** untuk 3 servo | 1 |
+| PC/Laptop | Untuk inferensi YOLOv8 | 1 |
+
+### Catatan: D1 Mini vs ESP32
+
+**D1 Mini bisa digunakan** — pin yang dibutuhkan (5 GPIO) pas dengan pin aman yang tersedia:
+
+| Pin Board | GPIO | Fungsi |
+|-----------|------|--------|
+| D1 | GPIO 5 | Servo 0 — Power AC |
+| D2 | GPIO 4 | Servo 1 — Temp Up |
+| D5 | GPIO 14 | Servo 2 — Temp Down |
+| D6 | GPIO 12 | Relay — Lampu |
+| D7 | GPIO 13 | DHT22 Data |
+
+**Tapi sangat disarankan upgrade ke ESP32** karena:
+- PWM servo di ESP8266 adalah *software timer* — bisa jitter saat Wi-Fi aktif, posisi servo jadi tidak presisi
+- ESP32 punya **hardware PWM (LEDC)** yang independen dari Wi-Fi, dual core
+- Lebih banyak ruang jika mau tambah komponen
+
+> **Power servo:** Jangan sambungkan servo ke pin VCC/3.3V onboard. Gunakan power supply 5V eksternal dengan GND bersama (common GND) ke board.
 
 ---
 
@@ -63,40 +79,38 @@ Sistem kendali otomatis AC dan pencahayaan ruang kuliah berbasis **computer visi
 
 ```
 indoor-monitoring/
-├── .github/ISSUE_TEMPLATE/   # Template laporan bug & fitur
 ├── edge_node/
-│   ├── esp32_cam_stream/     # Firmware MJPEG HTTP Server
-│   └── esp32_relay_mqtt/     # Firmware MQTT Relay Controller
+│   ├── esp32_cam_stream/        # Firmware MJPEG HTTP Server
+│   │   └── esp32_cam_stream.ino
+│   └── d1mini_actuator/         # Firmware aktuator terpadu (servo + relay + DHT22)
+│       └── d1mini_actuator.ino
 ├── server_ai/
-│   ├── main.py               # Entry point (--mode akuisisi/real)
-│   ├── config.py             # Semua konfigurasi
-│   ├── stream_source.py      # Abstraksi video (file / HTTP)
-│   ├── yolo_detector.py      # YOLOv8 inference
-│   ├── control_logic.py      # Logika zoning & counting
-│   ├── mqtt_client.py        # Paho-MQTT (mode real)
-│   ├── mock_mqtt.py          # Mock MQTT (mode akuisisi)
+│   ├── main.py                  # Entry point
+│   ├── config.py                # Semua konfigurasi
+│   ├── stream_source.py         # HTTP MJPEG stream dari ESP32-CAM
+│   ├── yolo_detector.py         # YOLOv8 inference
+│   ├── control_logic.py         # Logika kendali (orang → AC / lampu)
+│   ├── actuator_client.py       # HTTP client ke D1 Mini REST API
 │   ├── requirements.txt
-│   ├── weights/              # Simpan file .pt di sini (lihat panduan)
-│   └── dashboard/            # Flask web dashboard
+│   ├── weights/                 # Simpan model .pt di sini
+│   └── dashboard/               # Flask web dashboard
 │       ├── app.py
 │       ├── templates/index.html
 │       └── static/
-├── docs/                     # Skema & flowchart
-├── data/
-│   ├── test_videos/          # Video uji (tidak di-commit)
-│   └── logs/                 # Log CSV output
+│           ├── script.js        # Monitor + AC/lamp controls
+│           ├── calibrate.js     # Kalibrasi servo + settings
+│           └── style.css
+├── docs/
+├── data/logs/                   # Log CSV output
 ├── .gitignore
-├── LICENSE
-└── CONTRIBUTING.md
+└── LICENSE
 ```
 
 ---
 
-## Quick Start — Mode Akuisisi (Tanpa Hardware)
+## Quick Start
 
-> Cocok untuk **bimbingan skripsi**, **sidang**, dan **testing** tanpa perlu ESP32 atau broker MQTT.
-
-### 1. Setup Environment Python
+### 1. Setup Python
 
 ```bash
 cd server_ai
@@ -105,137 +119,173 @@ python -m venv .venv
 # Windows
 .venv\Scripts\activate
 
-# Linux / macOS
-source .venv/bin/activate
-
 pip install -r requirements.txt
 ```
 
 ### 2. Unduh Model YOLOv8
 
 ```bash
-# Jalankan dari dalam folder server_ai/ (virtual env aktif)
 python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
+move yolov8n.pt weights\    # Windows
+# atau: mv yolov8n.pt weights/  (Linux/macOS)
 ```
 
-Setelah selesai, pindahkan file `yolov8n.pt` ke folder `server_ai/weights/`:
-
-```bash
-# Windows
-move yolov8n.pt weights\
-
-# Linux / macOS
-mv yolov8n.pt weights/
-```
-
-### 3. Siapkan Video Uji
-
-Letakkan file video (`.mp4` atau `.avi`) di folder `data/test_videos/`.
-Lihat `data/test_videos/README.md` untuk panduan mendapatkan video.
-
-### 4. Jalankan Sistem
-
-```bash
-# Dari folder server_ai/
-python main.py --mode akuisisi --source ../data/test_videos/sample.mp4
-```
-
-### 5. Buka Dashboard
-
-Buka browser dan akses: **http://localhost:5000**
-
-Dashboard menampilkan:
-- Live video feed dengan bounding box deteksi orang
-- Jumlah orang per zona (depan / belakang)
-- Status relay AC dan lampu (ON/OFF)
-- Log perintah yang dihasilkan sistem
-
----
-
-## Quick Start — Mode Real (Dengan Hardware)
-
-### 1. Upload Firmware ESP32-CAM
+### 3. Flash Firmware ESP32-CAM
 
 1. Buka `edge_node/esp32_cam_stream/esp32_cam_stream.ino` di Arduino IDE
 2. Edit `WIFI_SSID` dan `WIFI_PASSWORD`
-3. Pilih board: **AI Thinker ESP32-CAM**
-4. Upload, lalu buka Serial Monitor @ 115200 baud
-5. Catat IP address yang muncul (contoh: `192.168.1.100`)
+3. Board: **AI Thinker ESP32-CAM**
+4. Upload → buka Serial Monitor 115200 baud → catat IP (contoh: `192.168.1.100`)
 
-### 2. Upload Firmware ESP32 Relay
+### 4. Flash Firmware D1 Mini / ESP32
 
-1. Buka `edge_node/esp32_relay_mqtt/esp32_relay_mqtt.ino` di Arduino IDE
-2. Edit `WIFI_SSID`, `WIFI_PASSWORD`, dan `MQTT_SERVER` (IP komputer)
-3. Pilih board: **ESP32 Dev Module**
-4. Upload firmware
+1. Buka `edge_node/d1mini_actuator/d1mini_actuator.ino` di Arduino IDE
+2. Edit `WIFI_SSID` dan `WIFI_PASSWORD`
+3. **Jika D1 Mini:** Board → **LOLIN(WEMOS) D1 R2 & mini**  
+   **Jika ESP32:** Board → **ESP32 Dev Module**
+4. Install library via Library Manager:
+   - `ESP8266Servo` (D1 Mini) **atau** `ESP32Servo` (ESP32)
+   - `DHTesp` by beegee-tokyo
+   - `ArduinoJson` by Benoit Blanchon
+   - LittleFS (sudah built-in di ESP8266/ESP32 core)
+5. Upload → buka Serial Monitor 115200 → catat IP (contoh: `192.168.1.101`)
+6. Test: buka `http://192.168.1.101/health` di browser → harus muncul JSON `{"status":"ok",...}`
 
-### 3. Jalankan Mosquitto MQTT Broker
-
-```bash
-# Install Mosquitto: https://mosquitto.org/download/
-
-# Windows (jalankan sebagai Service atau langsung)
-mosquitto -v
-
-# Linux
-sudo systemctl start mosquitto
-```
-
-### 4. Konfigurasi Server
+### 5. Konfigurasi Server
 
 Edit `server_ai/config.py`:
 
 ```python
 ESP32_STREAM_URL = "http://192.168.1.100:81/stream"  # IP ESP32-CAM kamu
-MQTT_BROKER_HOST = "localhost"                         # atau IP broker
+ACTUATOR_URL     = "http://192.168.1.101"            # IP D1 Mini kamu
 ```
 
-### 5. Jalankan Server AI
+### 6. Jalankan Server
 
 ```bash
 cd server_ai
-.venv\Scripts\activate   # Windows
-python main.py --mode real
+.venv\Scripts\activate
+python main.py
 ```
 
-### 6. Buka Dashboard
-
-Akses: **http://localhost:5000**
+Buka browser: **http://localhost:5000**
 
 ---
 
-## Panduan Wiring Hardware
-
-### ESP32-CAM + Power Supply
+## Panduan Wiring D1 Mini / ESP32
 
 ```
-Adaptor 5V/2A
-├── (+) → ESP32-CAM pin 5V
-└── (-) → ESP32-CAM pin GND
+D1 Mini / ESP32      Komponen
+────────────────     ─────────────────────────────────────────
+D1 (GPIO 5)    →    Servo 0 Signal (Power AC)
+D2 (GPIO 4)    →    Servo 1 Signal (Temp Up)
+D5 (GPIO 14)   →    Servo 2 Signal (Temp Down)
+D6 (GPIO 12)   →    Relay IN (Lampu)
+D7 (GPIO 13)   →    DHT22 Data
+
+Power Supply 5V Eksternal:
+  (+)   →    Servo VCC (ketiga servo)
+  (-)   →    Servo GND + GND board (common ground)
+
+DHT22:
+  VCC   →    3.3V board
+  DATA  →    D7 (GPIO 13)  + resistor 10kΩ ke 3.3V (pull-up)
+  GND   →    GND board
+
+Relay:
+  IN    →    D6 (GPIO 12)
+  VCC   →    5V board atau eksternal
+  GND   →    GND board
+  COM & NO   →    Sambungkan ke kabel saklar lampu (awas 220V!)
 ```
 
-> **Penting:** Jangan power ESP32-CAM lewat USB programmer saat streaming, gunakan adaptor 5V/2A langsung.
-
-### ESP32 + Modul Relay 4-Channel
+### Koneksi Relay ke Saklar Lampu
 
 ```
-ESP32               Modul Relay
-------              -----------
-GPIO 12     →       IN1  (Relay 1 - AC)
-GPIO 13     →       IN2  (Relay 2 - Lampu Depan)
-GPIO 14     →       IN3  (Relay 3 - Lampu Belakang)
-GPIO 15     →       IN4  (Relay 4 - Cadangan)
-5V          →       VCC
-GND         →       GND
+Fasa 220V → COM relay → NO relay → kabel ke beban lampu → Netral → kembali ke sumber
 ```
 
-### Koneksi Beban AC (Contoh untuk Lampu)
+> ⚠️ **Peringatan Keselamatan:** Selalu gunakan isolasi yang memadai. Matikan MCB sebelum menyambungkan ke jaringan listrik AC 220V.
 
-```
-Fasa AC 220V → COM relay → NO relay → Kabel ke Lampu → Netral → kembali ke sumber
-```
+---
 
-> **Peringatan Keselamatan:** Selalu gunakan isolasi yang memadai. Jangan menyentuh terminal AC saat sistem beroperasi.
+## Panduan Kalibrasi Servo
+
+Servo sudah terpasang di casing 3D-printed pada remote Daikin. Default posisi servo = 90° (tengah, aman). Kalibrasi harus dilakukan sekali untuk menentukan posisi diam dan posisi klik setiap servo.
+
+**Aturan:** Perjalanan servo (jarak antara stay dan click) **tidak boleh lebih dari 120°** — firmware dan UI akan memperingatkan jika terlewati.
+
+### Langkah Kalibrasi via Dashboard
+
+1. Buka **http://localhost:5000**
+2. Klik tab **🎛️ Kalibrasi Servo**
+3. Untuk tiap servo (Power, Temp+, Temp−):
+   a. Geser **slider** → servo fisik bergerak ke sudut tersebut (klik **▶ Gerak**)
+   b. Atur ke posisi di mana servo **tidak menekan tombol** → klik **📌 Set Stay**
+   c. Geser slider ke posisi di mana servo **menekan tombol** (maks. 120° dari stay) → klik **🎯 Set Click**
+   d. Klik **⚡ Test Klik** — servo akan bergerak: cepat 70% pertama, lambat 30% terakhir, tahan 200ms, balik ke stay
+   e. Jika sudah pas, klik sekali **▶ Gerak** + **📌 Set Stay** / **🎯 Set Click** untuk pastikan disimpan
+4. Klik **🔄 Refresh Kalibrasi dari Node** untuk konfirmasi nilai tersimpan di firmware
+
+Kalibrasi disimpan ke LittleFS di D1 Mini — tidak hilang saat restart/flash ulang.
+
+---
+
+## Dashboard
+
+### Tab Monitor
+
+- **Live Feed**: Video dari ESP32-CAM dengan bounding box orang dan garis zona
+- **Deteksi Orang**: Jumlah total, zona atas, zona bawah
+- **AC Daikin**: Status on/off (yang diinginkan sistem), suhu & kelembaban dari DHT22, tombol manual Power/Temp+/Temp−
+- **Lampu**: Status relay, tombol nyala/mati manual
+- **Log Aksi**: 15 aksi terakhir dengan timestamp
+
+### Tab Kalibrasi Servo
+
+Panel interaktif untuk mengkalibrasi ketiga servo tanpa edit kode.
+
+### Tab Settings
+
+Ubah parameter sistem secara langsung (tersimpan ke `settings.json`, langsung berlaku tanpa restart):
+
+| Parameter | Default | Keterangan |
+|-----------|---------|------------|
+| YOLO Confidence | 0.5 | Threshold keyakinan deteksi orang |
+| Threshold AC | 1 | Minimal orang agar AC menyala |
+| Threshold Lampu | 1 | Minimal orang agar lampu menyala |
+| Zone Split Ratio | 0.5 | Posisi garis zona di video (0=atas, 1=bawah) |
+| Interval DHT22 | 10 | Seberapa sering baca sensor suhu (detik) |
+
+---
+
+## API Node Aktuator (D1 Mini / ESP32)
+
+Bisa diakses langsung dari browser/curl untuk testing:
+
+```bash
+# Cek status node
+curl http://192.168.1.101/health
+
+# Baca sensor DHT22
+curl http://192.168.1.101/sensor
+
+# Gerakin servo (untuk kalibrasi manual)
+curl -X POST "http://192.168.1.101/servo/move?id=0&angle=90"
+
+# Klik servo (pakai kalibrasi tersimpan)
+curl -X POST "http://192.168.1.101/servo/click?id=0"
+
+# Simpan kalibrasi servo
+curl -X POST "http://192.168.1.101/servo/calibrate?id=0&stay=90&click=150"
+
+# Lihat semua kalibrasi
+curl http://192.168.1.101/servo/config
+
+# Kontrol relay lampu
+curl -X POST "http://192.168.1.101/relay?state=ON"
+curl -X POST "http://192.168.1.101/relay?state=OFF"
+```
 
 ---
 
@@ -243,52 +293,31 @@ Fasa AC 220V → COM relay → NO relay → Kabel ke Lampu → Netral → kembal
 
 Semua konfigurasi ada di `server_ai/config.py`. Nilai bisa di-override via environment variable:
 
-| Parameter | Default | Deskripsi |
-|-----------|---------|-----------|
-| `ESP32_STREAM_URL` | `http://192.168.1.100:81/stream` | URL MJPEG stream ESP32-CAM |
-| `MQTT_BROKER_HOST` | `localhost` | IP broker Mosquitto |
-| `MQTT_BROKER_PORT` | `1883` | Port MQTT |
-| `PERSON_THRESHOLD_AC` | `1` | Minimal orang untuk menyalakan AC |
-| `ZONE_SPLIT_RATIO` | `0.5` | Pembagi zona (0.5 = tengah frame) |
+| Parameter | Default | Keterangan |
+|-----------|---------|------------|
+| `ESP32_STREAM_URL` | `http://192.168.1.100:81/stream` | URL stream ESP32-CAM |
+| `ACTUATOR_URL` | `http://192.168.1.101` | IP node D1 Mini |
+| `ACTUATOR_TIMEOUT` | `2` | Timeout HTTP ke D1 Mini (detik) |
+| `PERSON_THRESHOLD_AC` | `1` | Minimal orang untuk nyalakan AC |
+| `PERSON_THRESHOLD_LAMP` | `1` | Minimal orang untuk nyalakan lampu |
+| `ZONE_SPLIT_RATIO` | `0.5` | Pembagi zona frame (untuk visualisasi) |
 | `YOLO_MODEL_PATH` | `weights/yolov8n.pt` | Path model YOLOv8 |
-| `YOLO_CONFIDENCE` | `0.5` | Threshold confidence deteksi |
-| `DASHBOARD_PORT` | `5000` | Port dashboard Flask |
-
----
-
-## Perintah CLI Lengkap
-
-```bash
-# Mode Akuisisi dengan video tertentu
-python main.py --mode akuisisi --source ../data/test_videos/kelas.mp4
-
-# Mode Akuisisi dengan tampilan jendela OpenCV
-python main.py --mode akuisisi --source ../data/test_videos/kelas.mp4 --show-window
-
-# Mode Real
-python main.py --mode real
-
-# Mode Real tanpa dashboard (headless)
-python main.py --mode real --no-dashboard
-
-# Mode Real dengan jendela OpenCV
-python main.py --mode real --show-window
-
-# Bantuan
-python main.py --help
-```
+| `YOLO_CONFIDENCE` | `0.5` | Threshold confidence |
+| `DASHBOARD_PORT` | `5000` | Port Flask |
+| `DHT22_POLL_INTERVAL` | `10` | Interval polling sensor suhu (detik) |
 
 ---
 
 ## Library Arduino yang Dibutuhkan
 
-Install melalui Arduino IDE Library Manager:
+Install via Arduino IDE → Library Manager:
 
 | Library | Dibutuhkan untuk |
 |---------|-----------------|
-| `PubSubClient` by Nick O'Leary | MQTT client ESP32 Relay |
-| `ArduinoJson` by Benoit Blanchon | Parse JSON payload MQTT |
-| ESP32 Board Package | Semua firmware ESP32 |
+| `ESP8266Servo` (D1 Mini) **atau** `ESP32Servo` (ESP32) | Kontrol servo SG90 |
+| `DHTesp` by beegee-tokyo | Sensor DHT22 |
+| `ArduinoJson` by Benoit Blanchon | JSON response API |
+| ESP8266/ESP32 Board Package | Semua firmware |
 
 ---
 

@@ -44,11 +44,8 @@ data/logs/*.json
 data/logs/*.log
 !data/logs/.gitkeep
 
-# Video uji (simpan di luar repo atau gunakan Git LFS)
-data/test_videos/*.mp4
-data/test_videos/*.avi
-data/test_videos/*.mov
-!data/test_videos/README.md
+# Settings runtime — berisi nilai konfigurasi yang diset via dashboard UI
+server_ai/settings.json
 
 # ── Arduino / ESP32 Build Artifacts ──────────────────────────────────────────
 *.elf

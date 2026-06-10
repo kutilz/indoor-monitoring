@@ -3,8 +3,8 @@ ultralytics>=8.0.0
 opencv-python>=4.8.0
 numpy>=1.24.0
 
-# ── MQTT (Mode Real) ──────────────────────────────────────────────────────────
-paho-mqtt>=1.6.1
+# ── Komunikasi HTTP ke Node Aktuator (D1 Mini) ────────────────────────────────
+requests>=2.31.0
 
 # ── Web Dashboard ─────────────────────────────────────────────────────────────
 flask>=3.0.0

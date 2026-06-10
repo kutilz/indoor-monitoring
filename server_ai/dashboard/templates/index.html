@@ -3,111 +3,374 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Dashboard Kendali AC & Pencahayaan</title>
+  <title>Dashboard — Kendali AC &amp; Lampu</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
-  <!-- ══ HEADER ══════════════════════════════════════════════════════════════ -->
+
+  <!-- ══ HEADER ════════════════════════════════════════════════════════════════ -->
   <header>
     <div class="header-left">
-      <h1>Sistem Kendali Cerdas AC &amp; Pencahayaan</h1>
-      <p class="subtitle">Ruang Kuliah &mdash; Berbasis YOLOv8 + ESP32</p>
+      <h1>Sistem Kendali AC &amp; Lampu</h1>
+      <p class="subtitle">ESP32-CAM + YOLOv8 + D1 Mini Servo Clicker</p>
     </div>
     <div class="header-right">
-      <span id="mode-badge" class="badge badge--akuisisi">AKUISISI</span>
+      <div class="status-pills">
+        <span id="pill-camera"   class="pill pill--offline">📷 Camera</span>
+        <span id="pill-actuator" class="pill pill--offline">🔌 Aktuator</span>
+      </div>
       <span id="fps-label" class="fps-label">0.0 FPS</span>
     </div>
   </header>
 
-  <!-- ══ MAIN GRID ═══════════════════════════════════════════════════════════ -->
-  <main class="grid">
+  <!-- ══ TABS ══════════════════════════════════════════════════════════════════ -->
+  <nav class="tab-bar">
+    <button class="tab-btn tab-btn--active" data-tab="monitor">📊 Monitor</button>
+    <button class="tab-btn" data-tab="calibrate">🎛️ Kalibrasi Servo</button>
+    <button class="tab-btn" data-tab="settings">⚙️ Settings</button>
+  </nav>
 
-    <!-- ── Panel Kiri: Video Feed ── -->
-    <section class="panel panel--video">
-      <h2>Live Feed</h2>
-      <div class="video-wrapper">
-        <img id="video-feed" src="/video_feed" alt="Live Feed" />
-        <div id="video-overlay" class="video-overlay">
-          <span>Menunggu frame...</span>
+  <!-- ══ TAB: MONITOR ══════════════════════════════════════════════════════════ -->
+  <div id="tab-monitor" class="tab-content tab-content--active">
+    <div class="monitor-grid">
+
+      <!-- ── Video Feed ── -->
+      <section class="panel panel--video">
+        <h2>Live Feed</h2>
+        <div class="video-wrapper">
+          <img id="video-feed" src="/video_feed" alt="Live Feed" />
+          <div id="video-overlay" class="video-overlay">
+            <span>📷 Menunggu kamera...</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Panel Kanan ── -->
+      <div class="right-panels">
+
+        <!-- Deteksi Orang -->
+        <section class="panel panel--stats">
+          <h2>Deteksi Orang</h2>
+          <div class="stats-grid">
+            <div class="stat-card stat-card--total">
+              <div class="stat-value" id="total-persons">0</div>
+              <div class="stat-label">Total</div>
+            </div>
+            <div class="stat-card stat-card--front">
+              <div class="stat-value" id="zone-front">0</div>
+              <div class="stat-label">Zona Atas</div>
+            </div>
+            <div class="stat-card stat-card--back">
+              <div class="stat-value" id="zone-back">0</div>
+              <div class="stat-label">Zona Bawah</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- AC Control -->
+        <section class="panel panel--ac">
+          <h2>AC Daikin</h2>
+          <div class="ac-body">
+            <div class="ac-status-row">
+              <div class="ac-state-info">
+                <div class="ac-state-label">Status</div>
+                <div class="ac-state-value" id="ac-state">OFF</div>
+              </div>
+              <div class="sensor-readings">
+                <div class="sensor-row">
+                  <span class="sensor-icon">🌡️</span>
+                  <span class="sensor-value" id="room-temp">--</span>
+                  <span class="sensor-unit">°C</span>
+                </div>
+                <div class="sensor-row">
+                  <span class="sensor-icon">💧</span>
+                  <span class="sensor-value" id="room-humidity">--</span>
+                  <span class="sensor-unit">%</span>
+                </div>
+                <div class="sensor-offline" id="sensor-offline-msg" style="display:none">
+                  Sensor offline
+                </div>
+              </div>
+            </div>
+            <div class="ac-buttons">
+              <button class="btn btn--power" id="btn-ac-power" title="Toggle Power AC">
+                ⏻ Power
+              </button>
+              <button class="btn btn--temp-up" id="btn-temp-up" title="Naik Suhu">
+                🔺 Suhu+
+              </button>
+              <button class="btn btn--temp-down" id="btn-temp-down" title="Turun Suhu">
+                🔻 Suhu−
+              </button>
+            </div>
+            <p class="ac-note">
+              Kontrol otomatis: AC menyala jika ada ≥ <span id="threshold-ac-display">1</span> orang terdeteksi.
+            </p>
+          </div>
+        </section>
+
+        <!-- Lampu -->
+        <section class="panel panel--lamp">
+          <h2>Lampu Ruangan</h2>
+          <div class="lamp-body">
+            <div class="lamp-indicator-row">
+              <div class="lamp-dot" id="lamp-dot"></div>
+              <div class="lamp-state" id="lamp-state">OFF</div>
+            </div>
+            <div class="lamp-buttons">
+              <button class="btn btn--lamp-on"  id="btn-lamp-on">💡 Nyalakan</button>
+              <button class="btn btn--lamp-off" id="btn-lamp-off">🔌 Matikan</button>
+            </div>
+            <p class="ac-note">
+              Kontrol otomatis: Lampu menyala jika ada ≥ <span id="threshold-lamp-display">1</span> orang terdeteksi.
+            </p>
+          </div>
+        </section>
+
+        <!-- Log Aksi -->
+        <section class="panel panel--log">
+          <h2>Log Aksi <span class="log-count" id="log-count">(0)</span></h2>
+          <div class="log-table-wrapper">
+            <table class="log-table">
+              <thead>
+                <tr><th>Waktu</th><th>Aktuator</th><th>Aksi</th><th>Alasan</th></tr>
+              </thead>
+              <tbody id="log-body">
+                <tr><td colspan="4" class="log-empty">Belum ada aksi.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+      </div><!-- /.right-panels -->
+    </div><!-- /.monitor-grid -->
+  </div><!-- /#tab-monitor -->
+
+
+  <!-- ══ TAB: KALIBRASI ════════════════════════════════════════════════════════ -->
+  <div id="tab-calibrate" class="tab-content">
+    <div class="calibrate-wrapper">
+      <div class="calibrate-header">
+        <h2>Kalibrasi Servo SG90</h2>
+        <p class="calibrate-desc">
+          Geser slider untuk menggerakkan servo ke posisi yang diinginkan, lalu tekan
+          <strong>Set Stay</strong> (posisi diam) atau <strong>Set Click</strong> (posisi klik).
+          Tekan <strong>Test Klik</strong> untuk uji coba urutan klik penuh dengan easing.
+          Maks. perjalanan servo: <strong>120°</strong>.
+        </p>
+        <div class="actuator-warn" id="calib-actuator-warn" style="display:none">
+          ⚠️ Node aktuator offline — kalibrasi tidak bisa dilakukan.
         </div>
       </div>
-    </section>
 
-    <!-- ── Panel Kanan ── -->
-    <aside class="panel-group">
+      <div class="servo-cards" id="servo-cards">
 
-      <!-- Statistik Orang -->
-      <section class="panel panel--stats">
-        <h2>Deteksi Orang</h2>
-        <div class="stats-grid">
-          <div class="stat-card stat-card--total">
-            <div class="stat-value" id="total-persons">0</div>
-            <div class="stat-label">Total Orang</div>
+        <!-- Servo 0: Power -->
+        <div class="servo-card" data-servo-id="0">
+          <div class="servo-card-header">
+            <span class="servo-name">⏻ Power AC</span>
+            <span class="servo-badge">Servo 0</span>
           </div>
-          <div class="stat-card stat-card--front">
-            <div class="stat-value" id="zone-front">0</div>
-            <div class="stat-label">Zona Depan</div>
+          <div class="servo-angles">
+            <div class="angle-item">
+              <span class="angle-label">Stay</span>
+              <span class="angle-val" id="s0-stay-val">90°</span>
+            </div>
+            <div class="angle-arrow">→</div>
+            <div class="angle-item">
+              <span class="angle-label">Click</span>
+              <span class="angle-val" id="s0-click-val">90°</span>
+            </div>
+            <div class="angle-item">
+              <span class="angle-label">Travel</span>
+              <span class="angle-val angle-val--travel" id="s0-travel-val">0°</span>
+            </div>
           </div>
-          <div class="stat-card stat-card--back">
-            <div class="stat-value" id="zone-back">0</div>
-            <div class="stat-label">Zona Belakang</div>
+          <div class="servo-slider-row">
+            <span class="slider-bound">0°</span>
+            <input type="range" min="0" max="180" value="90"
+                   class="servo-slider" id="s0-slider"
+                   oninput="onSliderInput(0, this.value)" />
+            <span class="slider-bound">180°</span>
+            <span class="slider-cur" id="s0-slider-cur">90°</span>
+          </div>
+          <div class="servo-action-btns">
+            <button class="btn btn--move"       onclick="moveServo(0)">▶ Gerak</button>
+            <button class="btn btn--set-stay"   onclick="setStay(0)">📌 Set Stay</button>
+            <button class="btn btn--set-click"  onclick="setClick(0)">🎯 Set Click</button>
+            <button class="btn btn--test-click" onclick="testClick(0)">⚡ Test Klik</button>
+          </div>
+          <div class="servo-msg" id="s0-msg"></div>
+        </div>
+
+        <!-- Servo 1: Temp Up -->
+        <div class="servo-card" data-servo-id="1">
+          <div class="servo-card-header">
+            <span class="servo-name">🔺 Temp Up</span>
+            <span class="servo-badge">Servo 1</span>
+          </div>
+          <div class="servo-angles">
+            <div class="angle-item">
+              <span class="angle-label">Stay</span>
+              <span class="angle-val" id="s1-stay-val">90°</span>
+            </div>
+            <div class="angle-arrow">→</div>
+            <div class="angle-item">
+              <span class="angle-label">Click</span>
+              <span class="angle-val" id="s1-click-val">90°</span>
+            </div>
+            <div class="angle-item">
+              <span class="angle-label">Travel</span>
+              <span class="angle-val angle-val--travel" id="s1-travel-val">0°</span>
+            </div>
+          </div>
+          <div class="servo-slider-row">
+            <span class="slider-bound">0°</span>
+            <input type="range" min="0" max="180" value="90"
+                   class="servo-slider" id="s1-slider"
+                   oninput="onSliderInput(1, this.value)" />
+            <span class="slider-bound">180°</span>
+            <span class="slider-cur" id="s1-slider-cur">90°</span>
+          </div>
+          <div class="servo-action-btns">
+            <button class="btn btn--move"       onclick="moveServo(1)">▶ Gerak</button>
+            <button class="btn btn--set-stay"   onclick="setStay(1)">📌 Set Stay</button>
+            <button class="btn btn--set-click"  onclick="setClick(1)">🎯 Set Click</button>
+            <button class="btn btn--test-click" onclick="testClick(1)">⚡ Test Klik</button>
+          </div>
+          <div class="servo-msg" id="s1-msg"></div>
+        </div>
+
+        <!-- Servo 2: Temp Down -->
+        <div class="servo-card" data-servo-id="2">
+          <div class="servo-card-header">
+            <span class="servo-name">🔻 Temp Down</span>
+            <span class="servo-badge">Servo 2</span>
+          </div>
+          <div class="servo-angles">
+            <div class="angle-item">
+              <span class="angle-label">Stay</span>
+              <span class="angle-val" id="s2-stay-val">90°</span>
+            </div>
+            <div class="angle-arrow">→</div>
+            <div class="angle-item">
+              <span class="angle-label">Click</span>
+              <span class="angle-val" id="s2-click-val">90°</span>
+            </div>
+            <div class="angle-item">
+              <span class="angle-label">Travel</span>
+              <span class="angle-val angle-val--travel" id="s2-travel-val">0°</span>
+            </div>
+          </div>
+          <div class="servo-slider-row">
+            <span class="slider-bound">0°</span>
+            <input type="range" min="0" max="180" value="90"
+                   class="servo-slider" id="s2-slider"
+                   oninput="onSliderInput(2, this.value)" />
+            <span class="slider-bound">180°</span>
+            <span class="slider-cur" id="s2-slider-cur">90°</span>
+          </div>
+          <div class="servo-action-btns">
+            <button class="btn btn--move"       onclick="moveServo(2)">▶ Gerak</button>
+            <button class="btn btn--set-stay"   onclick="setStay(2)">📌 Set Stay</button>
+            <button class="btn btn--set-click"  onclick="setClick(2)">🎯 Set Click</button>
+            <button class="btn btn--test-click" onclick="testClick(2)">⚡ Test Klik</button>
+          </div>
+          <div class="servo-msg" id="s2-msg"></div>
+        </div>
+
+      </div><!-- /.servo-cards -->
+
+      <div class="calibrate-footer">
+        <button class="btn btn--refresh-cal" onclick="loadCalibration()">
+          🔄 Refresh Kalibrasi dari Node
+        </button>
+      </div>
+    </div>
+  </div><!-- /#tab-calibrate -->
+
+
+  <!-- ══ TAB: SETTINGS ═════════════════════════════════════════════════════════ -->
+  <div id="tab-settings" class="tab-content">
+    <div class="settings-wrapper">
+      <h2>Settings Sistem</h2>
+      <p class="settings-desc">
+        Ubah parameter sistem secara langsung tanpa restart server atau edit kode.
+        Nilai disimpan ke <code>settings.json</code> dan langsung berlaku.
+      </p>
+
+      <form id="settings-form" class="settings-form">
+
+        <div class="setting-group">
+          <label class="setting-label">
+            YOLO Confidence Threshold
+            <span class="setting-hint">Minimum keyakinan deteksi orang (0.1–0.9)</span>
+          </label>
+          <div class="setting-slider-row">
+            <input type="range" id="s-yolo-conf" name="yolo_confidence"
+                   min="0.1" max="0.9" step="0.05" value="0.5"
+                   oninput="document.getElementById('s-yolo-conf-val').textContent = parseFloat(this.value).toFixed(2)" />
+            <span class="setting-val" id="s-yolo-conf-val">0.50</span>
           </div>
         </div>
-      </section>
 
-      <!-- Status Relay -->
-      <section class="panel panel--relay">
-        <h2>Status Aktuator</h2>
-        <div class="relay-list">
-          <div class="relay-item" id="relay-ac">
-            <div class="relay-icon">&#10052;</div>
-            <div class="relay-info">
-              <div class="relay-name">AC / Pendingin</div>
-              <div class="relay-state relay-off" id="relay-ac-state">OFF</div>
-            </div>
-            <div class="relay-indicator relay-indicator--off" id="relay-ac-dot"></div>
-          </div>
-          <div class="relay-item" id="relay-light-front">
-            <div class="relay-icon">&#128161;</div>
-            <div class="relay-info">
-              <div class="relay-name">Lampu Zona Depan</div>
-              <div class="relay-state relay-off" id="relay-front-state">OFF</div>
-            </div>
-            <div class="relay-indicator relay-indicator--off" id="relay-front-dot"></div>
-          </div>
-          <div class="relay-item" id="relay-light-back">
-            <div class="relay-icon">&#128161;</div>
-            <div class="relay-info">
-              <div class="relay-name">Lampu Zona Belakang</div>
-              <div class="relay-state relay-off" id="relay-back-state">OFF</div>
-            </div>
-            <div class="relay-indicator relay-indicator--off" id="relay-back-dot"></div>
+        <div class="setting-group">
+          <label class="setting-label">
+            Threshold Orang — AC
+            <span class="setting-hint">Minimal orang agar AC menyala otomatis</span>
+          </label>
+          <input type="number" id="s-thr-ac" name="person_threshold_ac"
+                 min="1" max="20" value="1" class="setting-input" />
+        </div>
+
+        <div class="setting-group">
+          <label class="setting-label">
+            Threshold Orang — Lampu
+            <span class="setting-hint">Minimal orang agar lampu menyala otomatis</span>
+          </label>
+          <input type="number" id="s-thr-lamp" name="person_threshold_lamp"
+                 min="1" max="20" value="1" class="setting-input" />
+        </div>
+
+        <div class="setting-group">
+          <label class="setting-label">
+            Zone Split Ratio
+            <span class="setting-hint">Garis pemisah zona pada video (0.0 = atas, 1.0 = bawah)</span>
+          </label>
+          <div class="setting-slider-row">
+            <input type="range" id="s-zone-split" name="zone_split_ratio"
+                   min="0.1" max="0.9" step="0.05" value="0.5"
+                   oninput="document.getElementById('s-zone-split-val').textContent = parseFloat(this.value).toFixed(2)" />
+            <span class="setting-val" id="s-zone-split-val">0.50</span>
           </div>
         </div>
-      </section>
 
-      <!-- Log Perintah -->
-      <section class="panel panel--log">
-        <h2>Log Perintah <span class="log-count" id="log-count">(0)</span></h2>
-        <div class="log-table-wrapper">
-          <table class="log-table">
-            <thead>
-              <tr>
-                <th>Waktu</th>
-                <th>Aktuator</th>
-                <th>State</th>
-              </tr>
-            </thead>
-            <tbody id="log-body">
-              <tr><td colspan="3" class="log-empty">Belum ada perintah.</td></tr>
-            </tbody>
-          </table>
+        <div class="setting-group">
+          <label class="setting-label">
+            Interval Polling DHT22
+            <span class="setting-hint">Seberapa sering server baca sensor suhu (detik, min 5)</span>
+          </label>
+          <input type="number" id="s-dht-interval" name="dht22_poll_interval"
+                 min="5" max="300" value="10" class="setting-input" />
         </div>
-      </section>
 
-    </aside>
-  </main>
+        <div class="settings-actions">
+          <button type="button" class="btn btn--save-settings" onclick="saveSettings()">
+            💾 Simpan Settings
+          </button>
+          <button type="button" class="btn btn--load-settings" onclick="loadSettings()">
+            🔄 Reload dari Server
+          </button>
+        </div>
+
+        <div id="settings-msg" class="settings-msg"></div>
+
+      </form>
+    </div>
+  </div><!-- /#tab-settings -->
+
 
   <script src="/static/script.js"></script>
+  <script src="/static/calibrate.js"></script>
 </body>
 </html>

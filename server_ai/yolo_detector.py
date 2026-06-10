@@ -75,6 +75,11 @@ class YoloDetector:
         print("[YoloDetector] Model siap.")
         return model
 
+    def set_confidence(self, confidence: float):
+        """Update threshold confidence secara runtime (dari dashboard settings)."""
+        self._confidence = float(confidence)
+        print(f"[YoloDetector] Confidence diubah ke: {self._confidence}")
+
     def detect(self, frame: np.ndarray) -> list[Detection]:
         """
         Jalankan inferensi pada satu frame.
