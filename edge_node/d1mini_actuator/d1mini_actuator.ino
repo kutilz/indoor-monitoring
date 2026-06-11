@@ -432,9 +432,10 @@ void setup() {
   dht.setup(PIN_DHT22, DHTesp::DHT22);
   Serial.println("[Boot] DHT22 diinisialisasi.");
 
-  // LittleFS
-  if (!LittleFS.begin()) {
-    Serial.println("[Boot] LittleFS gagal mount! Format flash terlebih dahulu.");
+  // LittleFS — format otomatis jika partisi belum pernah diformat (umum terjadi
+  // pada ESP32 baru / pertama kali pakai LittleFS)
+  if (!LittleFS.begin(true)) {
+    Serial.println("[Boot] LittleFS gagal mount walau sudah dicoba format! Cek Partition Scheme di Tools (harus ada alokasi SPIFFS/LittleFS).");
     // Jangan stop — lanjutkan dengan nilai default
   } else {
     Serial.println("[Boot] LittleFS OK.");
