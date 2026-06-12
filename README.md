@@ -8,7 +8,7 @@
 
 Sistem kendali otomatis AC dan lampu berbasis **computer vision (YOLOv8)** dan **IoT (ESP32)**. Kamera mendeteksi keberadaan orang, lalu:
 
-- AC **diklik mati/hidup** otomatis via servo SG90 yang dijepit ke remote Daikin Cassette
+- AC **diklik mati/hidup** otomatis via servo continuous-rotation MG996R yang dijepit ke remote Daikin Cassette
 - Lampu **dinyalakan/dimatikan** via relay
 - Suhu & kelembaban ruangan dipantau via DHT22
 - **Semua bisa dikalibrasi dan dikonfigurasi lewat dashboard web — tanpa edit kode**
@@ -47,11 +47,11 @@ Tidak ada MQTT broker — komunikasi via HTTP langsung.
 | Adaptor 5V | Untuk power ESP32-CAM langsung (bukan USB programmer) | 1 |
 | **Wemos D1 Mini** | ESP8266-based (cukup dari segi pin — lihat catatan di bawah) | 1 |
 | **atau ESP32 Dev Board** | **Lebih disarankan** untuk stabilitas PWM servo (lihat catatan) | 1 |
-| Servo SG90 | 180°, torsi 1.8 kg·cm | 3 |
+| Servo MG996R | 360° continuous rotation, torsi ~9.4 kg·cm | 3 |
 | Modul Relay 1-Channel | 5V coil, beban AC 220V/10A | 1 |
 | Sensor DHT22 | Suhu & kelembaban | 1 |
 | Resistor 10kΩ | Pull-up untuk data DHT22 | 1 |
-| Power Supply Servo | **5V/2A eksternal terpisah** untuk 3 servo | 1 |
+| Power Supply Servo | **5V/6V eksternal, min. 5A** untuk 3 servo MG996R | 1 |
 | PC/Laptop | Untuk inferensi YOLOv8 | 1 |
 
 ### Catatan: D1 Mini vs ESP32
@@ -71,7 +71,7 @@ Tidak ada MQTT broker — komunikasi via HTTP langsung.
 - ESP32 punya **hardware PWM (LEDC)** yang independen dari Wi-Fi, dual core
 - Lebih banyak ruang jika mau tambah komponen
 
-> **Power servo:** Jangan sambungkan servo ke pin VCC/3.3V onboard. Gunakan power supply 5V eksternal dengan GND bersama (common GND) ke board.
+> **Power servo:** MG996R menarik arus jauh lebih besar dari SG90 (stall current ~2.5A per servo @ 6V). Jangan sambungkan servo ke pin VCC/3.3V/5V onboard. Gunakan power supply 5V/6V eksternal **minimal 5A** dengan GND bersama (common GND) ke board.
 
 ---
 
@@ -211,23 +211,40 @@ Fasa 220V → COM relay → NO relay → kabel ke beban lampu → Netral → kem
 
 ## Panduan Kalibrasi Servo
 
-Servo sudah terpasang di casing 3D-printed pada remote Daikin. Default posisi servo = 90° (tengah, aman). Kalibrasi harus dilakukan sekali untuk menentukan posisi diam dan posisi klik setiap servo.
+Servo MG996R sudah terpasang di casing 3D-printed pada remote Daikin. Servo ini **continuous-rotation (360°)** — tidak punya posisi sudut. Sinyal PWM hanya menentukan **arah** dan **kecepatan** putar; servo berhenti saat sinyal kembali ke titik netral (~1500µs). Karena orientasi mounting tiap servo berbeda, **arah putar yang menekan tombol AC (CW atau CCW) harus dikalibrasi per servo**.
 
-**Aturan:** Perjalanan servo (jarak antara stay dan click) **tidak boleh lebih dari 120°** — firmware dan UI akan memperingatkan jika terlewati.
+### Model Kalibrasi
+
+| Parameter | Arti |
+|-----------|------|
+| **Kecepatan Jog** | Kecepatan putar saat tombol jog ditahan (0-100%) — juga dipakai sebagai kecepatan klik |
+| **Arah Klik** | CW atau CCW — arah putar yang menekan tombol AC pada servo ini |
+| **Durasi Klik** | Lama servo berputar ke *Arah Klik* untuk menekan tombol (ms) |
+| **Durasi Kembali** | Lama servo berputar ke arah berlawanan untuk kembali ke posisi awal (ms) |
+| **Trim Netral** | Koreksi titik "stop" (±100µs dari 1500µs) jika servo masih sedikit bergerak saat seharusnya diam |
 
 ### Langkah Kalibrasi via Dashboard
 
 1. Buka **http://localhost:5000**
 2. Klik tab **🎛️ Kalibrasi Servo**
 3. Untuk tiap servo (Power, Temp+, Temp−):
-   a. Geser **slider** → servo fisik bergerak ke sudut tersebut (klik **▶ Gerak**)
-   b. Atur ke posisi di mana servo **tidak menekan tombol** → klik **📌 Set Stay**
-   c. Geser slider ke posisi di mana servo **menekan tombol** (maks. 120° dari stay) → klik **🎯 Set Click**
-   d. Klik **⚡ Test Klik** — servo akan bergerak: cepat 70% pertama, lambat 30% terakhir, tahan 200ms, balik ke stay
-   e. Jika sudah pas, klik sekali **▶ Gerak** + **📌 Set Stay** / **🎯 Set Click** untuk pastikan disimpan
-4. Klik **🔄 Refresh Kalibrasi dari Node** untuk konfirmasi nilai tersimpan di firmware
+   a. **Tahan** tombol **Putar CW** / **Putar CCW** untuk mengamati arah putar servo terhadap tombol AC — **lepas** untuk berhenti. Atur **Kecepatan Jog** agar putarannya pelan dan terkendali.
+   b. Tentukan arah mana (CW/CCW) yang menekan tombol AC, lalu pilih di toggle **Arah Klik**.
+   c. Atur **Durasi Klik** (cukup lama untuk menekan tombol sampai "klik") dan **Durasi Kembali** (biasanya sama dengan Durasi Klik agar servo balik ke posisi awal).
+   d. Jika servo masih bergerak pelan saat seharusnya diam, geser **Trim Netral** sampai servo benar-benar berhenti.
+   e. Klik **⚡ Test Klik** untuk uji coba urutan penuh (klik kalibrasi otomatis disimpan dulu sebelum test).
+   f. Jika sudah pas, klik **💾 Simpan Kalibrasi**.
 
-Kalibrasi disimpan ke LittleFS di D1 Mini — tidak hilang saat restart/flash ulang.
+Kalibrasi disimpan ke LittleFS di node aktuator — tidak hilang saat restart/flash ulang.
+
+### Safety: Watchdog Servo
+
+Karena MG996R bertorsi besar, ada beberapa lapisan pengaman bawaan firmware:
+
+- **Heartbeat jog**: selama tombol jog ditahan, dashboard mengirim perintah jog berulang (~150ms). Jika tidak ada perintah baru dalam **400ms** (mis. koneksi putus), servo **otomatis berhenti**.
+- **Batas durasi absolut**: jog otomatis berhenti setelah **4 detik** berjalan terus-menerus, walau heartbeat masih masuk — proteksi terhadap bug frontend.
+- **WiFi putus = stop instan**: jika node aktuator kehilangan koneksi WiFi, semua servo langsung dihentikan (tidak menunggu watchdog).
+- **Emergency stop**: tombol **🛑 STOP SEMUA SERVO** di tab Kalibrasi menghentikan semua servo segera, dan otomatis terpanggil saat tab/halaman ditutup atau disembunyikan.
 
 ---
 
@@ -270,14 +287,20 @@ curl http://192.168.1.101/health
 # Baca sensor DHT22
 curl http://192.168.1.101/sensor
 
-# Gerakin servo (untuk kalibrasi manual)
-curl -X POST "http://192.168.1.101/servo/move?id=0&angle=90"
+# Jog servo (putar selama "ditahan" — panggil berulang ~150ms sbg heartbeat)
+curl -X POST "http://192.168.1.101/servo/jog?id=0&dir=CW&speed=20"
 
-# Klik servo (pakai kalibrasi tersimpan)
+# Hentikan satu servo segera
+curl -X POST "http://192.168.1.101/servo/stop?id=0"
+
+# Hentikan SEMUA servo segera (emergency stop)
+curl -X POST "http://192.168.1.101/servo/stop_all"
+
+# Klik servo (pakai kalibrasi tersimpan: arah, kecepatan, durasi)
 curl -X POST "http://192.168.1.101/servo/click?id=0"
 
-# Simpan kalibrasi servo
-curl -X POST "http://192.168.1.101/servo/calibrate?id=0&stay=90&click=150"
+# Simpan kalibrasi servo (dir: CW/CCW, speed: 0-100, durasi dalam ms, trim: -100..100)
+curl -X POST "http://192.168.1.101/servo/calibrate?id=0&dir=CW&speed=30&click_ms=300&return_ms=300&trim=0"
 
 # Lihat semua kalibrasi
 curl http://192.168.1.101/servo/config
@@ -286,6 +309,8 @@ curl http://192.168.1.101/servo/config
 curl -X POST "http://192.168.1.101/relay?state=ON"
 curl -X POST "http://192.168.1.101/relay?state=OFF"
 ```
+
+> ⚠️ Jika `/servo/jog` dipanggil tanpa heartbeat lanjutan (mis. lewat curl sekali saja), servo akan **otomatis berhenti dalam ≤400ms** karena watchdog firmware — ini disengaja (lihat bagian Safety di Panduan Kalibrasi).
 
 ---
 
@@ -314,7 +339,7 @@ Install via Arduino IDE → Library Manager:
 
 | Library | Dibutuhkan untuk |
 |---------|-----------------|
-| `ESP8266Servo` (D1 Mini) **atau** `ESP32Servo` (ESP32) | Kontrol servo SG90 |
+| `ESP8266Servo` (D1 Mini) **atau** `ESP32Servo` (ESP32) | Kontrol servo MG996R (continuous rotation) |
 | `DHTesp` by beegee-tokyo | Sensor DHT22 |
 | `ArduinoJson` by Benoit Blanchon | JSON response API |
 | ESP8266/ESP32 Board Package | Semua firmware |

@@ -151,13 +151,27 @@
   <div id="tab-calibrate" class="tab-content">
     <div class="calibrate-wrapper">
       <div class="calibrate-header">
-        <h2>Kalibrasi Servo SG90</h2>
+        <h2>Kalibrasi Servo MG996R (Continuous Rotation)</h2>
         <p class="calibrate-desc">
-          Geser slider untuk menggerakkan servo ke posisi yang diinginkan, lalu tekan
-          <strong>Set Stay</strong> (posisi diam) atau <strong>Set Click</strong> (posisi klik).
-          Tekan <strong>Test Klik</strong> untuk uji coba urutan klik penuh dengan easing.
-          Maks. perjalanan servo: <strong>120°</strong>.
+          Servo ini berputar terus selama diberi sinyal — tidak punya posisi sudut tetap.
+          <strong>Tahan</strong> tombol CW/CCW untuk memutar pelan selama ditahan (kecepatan
+          sesuai slider), <strong>lepas</strong> untuk berhenti. Tentukan
+          <strong>Arah Klik</strong> per servo (arah putar yang menekan tombol AC, sesuai
+          orientasi mounting masing-masing servo), lalu atur <strong>Durasi Klik</strong>
+          (lama menekan) dan <strong>Durasi Kembali</strong> (lama putar balik ke posisi
+          awal). Geser <strong>Trim Netral</strong> jika servo masih sedikit bergerak saat
+          seharusnya diam.
         </p>
+        <div class="safety-banner">
+          🛟 <strong>Safety:</strong> jika koneksi ke node aktuator terputus saat tombol jog
+          ditahan, atau jog berjalan &gt;4 detik tanpa henti, servo berhenti otomatis.
+          Tombol di bawah menghentikan SEMUA servo segera — gunakan jika ada gerakan tak
+          terduga.
+        </div>
+        <div class="emergency-row">
+          <button class="btn btn--emergency-stop" onclick="stopAllServos()">🛑 STOP SEMUA SERVO</button>
+          <div class="servo-msg" id="emergency-msg"></div>
+        </div>
         <div class="actuator-warn" id="calib-actuator-warn" style="display:none">
           ⚠️ Node aktuator offline — kalibrasi tidak bisa dilakukan.
         </div>
@@ -171,34 +185,56 @@
             <span class="servo-name">⏻ Power AC</span>
             <span class="servo-badge">Servo 0</span>
           </div>
-          <div class="servo-angles">
-            <div class="angle-item">
-              <span class="angle-label">Stay</span>
-              <span class="angle-val" id="s0-stay-val">90°</span>
-            </div>
-            <div class="angle-arrow">→</div>
-            <div class="angle-item">
-              <span class="angle-label">Click</span>
-              <span class="angle-val" id="s0-click-val">90°</span>
-            </div>
-            <div class="angle-item">
-              <span class="angle-label">Travel</span>
-              <span class="angle-val angle-val--travel" id="s0-travel-val">0°</span>
+
+          <div class="jog-speed-row">
+            <span class="slider-label">Kecepatan Jog</span>
+            <input type="range" min="0" max="100" step="5" value="30"
+                   class="servo-slider" id="s0-speed-slider"
+                   oninput="onSpeedInput(0, this.value)" />
+            <span class="slider-cur" id="s0-speed-val">30%</span>
+          </div>
+
+          <div class="jog-btn-row">
+            <button class="jog-btn jog-btn--ccw" data-servo="0" data-dir="CCW">⟲ Putar CCW</button>
+            <button class="jog-btn jog-btn--cw"  data-servo="0" data-dir="CW">Putar CW ⟳</button>
+          </div>
+          <p class="jog-hint">Tahan untuk memutar, lepas untuk berhenti.</p>
+
+          <div class="dir-toggle-row">
+            <span class="slider-label">Arah Klik</span>
+            <div class="dir-toggle">
+              <button class="dir-toggle-btn" id="s0-dir-cw"  onclick="setClickDir(0,'CW')">CW</button>
+              <button class="dir-toggle-btn" id="s0-dir-ccw" onclick="setClickDir(0,'CCW')">CCW</button>
             </div>
           </div>
+
           <div class="servo-slider-row">
-            <span class="slider-bound">0°</span>
-            <input type="range" min="0" max="180" value="90"
-                   class="servo-slider" id="s0-slider"
-                   oninput="onSliderInput(0, this.value)" />
-            <span class="slider-bound">180°</span>
-            <span class="slider-cur" id="s0-slider-cur">90°</span>
+            <span class="slider-label">Durasi Klik</span>
+            <input type="range" min="50" max="3000" step="50" value="300"
+                   class="servo-slider" id="s0-click-ms-slider"
+                   oninput="onDurationInput(0, 'clickMs', this.value)" />
+            <span class="slider-cur" id="s0-click-ms-val">300ms</span>
           </div>
+
+          <div class="servo-slider-row">
+            <span class="slider-label">Durasi Kembali</span>
+            <input type="range" min="50" max="3000" step="50" value="300"
+                   class="servo-slider" id="s0-return-ms-slider"
+                   oninput="onDurationInput(0, 'returnMs', this.value)" />
+            <span class="slider-cur" id="s0-return-ms-val">300ms</span>
+          </div>
+
+          <div class="servo-slider-row">
+            <span class="slider-label">Trim Netral</span>
+            <input type="range" min="-100" max="100" step="5" value="0"
+                   class="servo-slider" id="s0-trim-slider"
+                   oninput="onTrimInput(0, this.value)" />
+            <span class="slider-cur" id="s0-trim-val">0us</span>
+          </div>
+
           <div class="servo-action-btns">
-            <button class="btn btn--move"       onclick="moveServo(0)">▶ Gerak</button>
-            <button class="btn btn--set-stay"   onclick="setStay(0)">📌 Set Stay</button>
-            <button class="btn btn--set-click"  onclick="setClick(0)">🎯 Set Click</button>
             <button class="btn btn--test-click" onclick="testClick(0)">⚡ Test Klik</button>
+            <button class="btn btn--save-cal"   onclick="saveCalibration(0)">💾 Simpan Kalibrasi</button>
           </div>
           <div class="servo-msg" id="s0-msg"></div>
         </div>
@@ -209,34 +245,56 @@
             <span class="servo-name">🔺 Temp Up</span>
             <span class="servo-badge">Servo 1</span>
           </div>
-          <div class="servo-angles">
-            <div class="angle-item">
-              <span class="angle-label">Stay</span>
-              <span class="angle-val" id="s1-stay-val">90°</span>
-            </div>
-            <div class="angle-arrow">→</div>
-            <div class="angle-item">
-              <span class="angle-label">Click</span>
-              <span class="angle-val" id="s1-click-val">90°</span>
-            </div>
-            <div class="angle-item">
-              <span class="angle-label">Travel</span>
-              <span class="angle-val angle-val--travel" id="s1-travel-val">0°</span>
+
+          <div class="jog-speed-row">
+            <span class="slider-label">Kecepatan Jog</span>
+            <input type="range" min="0" max="100" step="5" value="30"
+                   class="servo-slider" id="s1-speed-slider"
+                   oninput="onSpeedInput(1, this.value)" />
+            <span class="slider-cur" id="s1-speed-val">30%</span>
+          </div>
+
+          <div class="jog-btn-row">
+            <button class="jog-btn jog-btn--ccw" data-servo="1" data-dir="CCW">⟲ Putar CCW</button>
+            <button class="jog-btn jog-btn--cw"  data-servo="1" data-dir="CW">Putar CW ⟳</button>
+          </div>
+          <p class="jog-hint">Tahan untuk memutar, lepas untuk berhenti.</p>
+
+          <div class="dir-toggle-row">
+            <span class="slider-label">Arah Klik</span>
+            <div class="dir-toggle">
+              <button class="dir-toggle-btn" id="s1-dir-cw"  onclick="setClickDir(1,'CW')">CW</button>
+              <button class="dir-toggle-btn" id="s1-dir-ccw" onclick="setClickDir(1,'CCW')">CCW</button>
             </div>
           </div>
+
           <div class="servo-slider-row">
-            <span class="slider-bound">0°</span>
-            <input type="range" min="0" max="180" value="90"
-                   class="servo-slider" id="s1-slider"
-                   oninput="onSliderInput(1, this.value)" />
-            <span class="slider-bound">180°</span>
-            <span class="slider-cur" id="s1-slider-cur">90°</span>
+            <span class="slider-label">Durasi Klik</span>
+            <input type="range" min="50" max="3000" step="50" value="300"
+                   class="servo-slider" id="s1-click-ms-slider"
+                   oninput="onDurationInput(1, 'clickMs', this.value)" />
+            <span class="slider-cur" id="s1-click-ms-val">300ms</span>
           </div>
+
+          <div class="servo-slider-row">
+            <span class="slider-label">Durasi Kembali</span>
+            <input type="range" min="50" max="3000" step="50" value="300"
+                   class="servo-slider" id="s1-return-ms-slider"
+                   oninput="onDurationInput(1, 'returnMs', this.value)" />
+            <span class="slider-cur" id="s1-return-ms-val">300ms</span>
+          </div>
+
+          <div class="servo-slider-row">
+            <span class="slider-label">Trim Netral</span>
+            <input type="range" min="-100" max="100" step="5" value="0"
+                   class="servo-slider" id="s1-trim-slider"
+                   oninput="onTrimInput(1, this.value)" />
+            <span class="slider-cur" id="s1-trim-val">0us</span>
+          </div>
+
           <div class="servo-action-btns">
-            <button class="btn btn--move"       onclick="moveServo(1)">▶ Gerak</button>
-            <button class="btn btn--set-stay"   onclick="setStay(1)">📌 Set Stay</button>
-            <button class="btn btn--set-click"  onclick="setClick(1)">🎯 Set Click</button>
             <button class="btn btn--test-click" onclick="testClick(1)">⚡ Test Klik</button>
+            <button class="btn btn--save-cal"   onclick="saveCalibration(1)">💾 Simpan Kalibrasi</button>
           </div>
           <div class="servo-msg" id="s1-msg"></div>
         </div>
@@ -247,45 +305,61 @@
             <span class="servo-name">🔻 Temp Down</span>
             <span class="servo-badge">Servo 2</span>
           </div>
-          <div class="servo-angles">
-            <div class="angle-item">
-              <span class="angle-label">Stay</span>
-              <span class="angle-val" id="s2-stay-val">90°</span>
-            </div>
-            <div class="angle-arrow">→</div>
-            <div class="angle-item">
-              <span class="angle-label">Click</span>
-              <span class="angle-val" id="s2-click-val">90°</span>
-            </div>
-            <div class="angle-item">
-              <span class="angle-label">Travel</span>
-              <span class="angle-val angle-val--travel" id="s2-travel-val">0°</span>
+
+          <div class="jog-speed-row">
+            <span class="slider-label">Kecepatan Jog</span>
+            <input type="range" min="0" max="100" step="5" value="30"
+                   class="servo-slider" id="s2-speed-slider"
+                   oninput="onSpeedInput(2, this.value)" />
+            <span class="slider-cur" id="s2-speed-val">30%</span>
+          </div>
+
+          <div class="jog-btn-row">
+            <button class="jog-btn jog-btn--ccw" data-servo="2" data-dir="CCW">⟲ Putar CCW</button>
+            <button class="jog-btn jog-btn--cw"  data-servo="2" data-dir="CW">Putar CW ⟳</button>
+          </div>
+          <p class="jog-hint">Tahan untuk memutar, lepas untuk berhenti.</p>
+
+          <div class="dir-toggle-row">
+            <span class="slider-label">Arah Klik</span>
+            <div class="dir-toggle">
+              <button class="dir-toggle-btn" id="s2-dir-cw"  onclick="setClickDir(2,'CW')">CW</button>
+              <button class="dir-toggle-btn" id="s2-dir-ccw" onclick="setClickDir(2,'CCW')">CCW</button>
             </div>
           </div>
+
           <div class="servo-slider-row">
-            <span class="slider-bound">0°</span>
-            <input type="range" min="0" max="180" value="90"
-                   class="servo-slider" id="s2-slider"
-                   oninput="onSliderInput(2, this.value)" />
-            <span class="slider-bound">180°</span>
-            <span class="slider-cur" id="s2-slider-cur">90°</span>
+            <span class="slider-label">Durasi Klik</span>
+            <input type="range" min="50" max="3000" step="50" value="300"
+                   class="servo-slider" id="s2-click-ms-slider"
+                   oninput="onDurationInput(2, 'clickMs', this.value)" />
+            <span class="slider-cur" id="s2-click-ms-val">300ms</span>
           </div>
+
+          <div class="servo-slider-row">
+            <span class="slider-label">Durasi Kembali</span>
+            <input type="range" min="50" max="3000" step="50" value="300"
+                   class="servo-slider" id="s2-return-ms-slider"
+                   oninput="onDurationInput(2, 'returnMs', this.value)" />
+            <span class="slider-cur" id="s2-return-ms-val">300ms</span>
+          </div>
+
+          <div class="servo-slider-row">
+            <span class="slider-label">Trim Netral</span>
+            <input type="range" min="-100" max="100" step="5" value="0"
+                   class="servo-slider" id="s2-trim-slider"
+                   oninput="onTrimInput(2, this.value)" />
+            <span class="slider-cur" id="s2-trim-val">0us</span>
+          </div>
+
           <div class="servo-action-btns">
-            <button class="btn btn--move"       onclick="moveServo(2)">▶ Gerak</button>
-            <button class="btn btn--set-stay"   onclick="setStay(2)">📌 Set Stay</button>
-            <button class="btn btn--set-click"  onclick="setClick(2)">🎯 Set Click</button>
             <button class="btn btn--test-click" onclick="testClick(2)">⚡ Test Klik</button>
+            <button class="btn btn--save-cal"   onclick="saveCalibration(2)">💾 Simpan Kalibrasi</button>
           </div>
           <div class="servo-msg" id="s2-msg"></div>
         </div>
 
       </div><!-- /.servo-cards -->
-
-      <div class="calibrate-footer">
-        <button class="btn btn--refresh-cal" onclick="loadCalibration()">
-          🔄 Refresh Kalibrasi dari Node
-        </button>
-      </div>
     </div>
   </div><!-- /#tab-calibrate -->
 

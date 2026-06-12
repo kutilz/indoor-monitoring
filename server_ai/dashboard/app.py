@@ -8,11 +8,13 @@ Endpoint:
     GET  /api/state      → Snapshot state terkini (JSON)
     GET  /api/logs       → 50 log aksi terakhir (JSON)
 
-    # Kalibrasi servo
+    # Kalibrasi servo (continuous-rotation / jog)
     GET  /api/servo/config                     → kalibrasi tersimpan semua servo
-    POST /api/servo/<id>/move                  → gerakin servo ke sudut (body: {angle})
+    POST /api/servo/<id>/jog                   → jog servo (body: {dir, speed}) — heartbeat
+    POST /api/servo/<id>/stop                  → hentikan satu servo segera
+    POST /api/servo/stop_all                   → hentikan semua servo (emergency stop)
     POST /api/servo/<id>/click                 → test click urutan penuh
-    POST /api/servo/<id>/calibrate             → simpan kalibrasi (body: {stay, click})
+    POST /api/servo/<id>/calibrate             → simpan kalibrasi (body: {dir, speed, click_ms, return_ms, trim})
 
     # Kontrol manual AC
     POST /api/ac/power                         → klik tombol power AC
@@ -213,9 +215,9 @@ def api_servo_config():
     return jsonify(data)
 
 
-@app.route("/api/servo/<int:servo_id>/move", methods=["POST"])
-def api_servo_move(servo_id: int):
-    """Gerakin servo ke sudut tertentu (kalibrasi interaktif)."""
+@app.route("/api/servo/<int:servo_id>/jog", methods=["POST"])
+def api_servo_jog(servo_id: int):
+    """Jog servo continuous-rotation (kalibrasi manual). Dipanggil sbg heartbeat."""
     if servo_id < 0 or servo_id > 2:
         return _err("servo_id harus 0-2")
 
@@ -224,14 +226,46 @@ def api_servo_move(servo_id: int):
         return err
 
     body = request.get_json(silent=True) or {}
-    angle = body.get("angle")
-    if angle is None:
-        return _err("field 'angle' diperlukan")
+    direction = body.get("dir")
+    speed     = body.get("speed")
+    if direction is None or speed is None:
+        return _err("field 'dir' dan 'speed' diperlukan")
+    if str(direction).upper() not in ("CW", "CCW"):
+        return _err("field 'dir' harus 'CW' atau 'CCW'")
 
-    ok = _actuator.move_servo(servo_id, int(angle))
+    ok = _actuator.jog_servo(servo_id, str(direction), int(speed))
     if ok:
-        return _ok(servo_id=servo_id, angle=angle)
-    return _err("Gagal menggerak servo.", 502)
+        return _ok(servo_id=servo_id, dir=str(direction).upper(), speed=int(speed))
+    return _err("Gagal jog servo.", 502)
+
+
+@app.route("/api/servo/<int:servo_id>/stop", methods=["POST"])
+def api_servo_stop(servo_id: int):
+    """Hentikan satu servo segera."""
+    if servo_id < 0 or servo_id > 2:
+        return _err("servo_id harus 0-2")
+
+    err = _require_actuator()
+    if err:
+        return err
+
+    ok = _actuator.stop_servo(servo_id)
+    if ok:
+        return _ok(servo_id=servo_id)
+    return _err("Gagal menghentikan servo.", 502)
+
+
+@app.route("/api/servo/stop_all", methods=["POST"])
+def api_servo_stop_all():
+    """Hentikan semua servo segera (emergency stop)."""
+    err = _require_actuator()
+    if err:
+        return err
+
+    ok = _actuator.stop_all_servos()
+    if ok:
+        return _ok()
+    return _err("Gagal menghentikan semua servo.", 502)
 
 
 @app.route("/api/servo/<int:servo_id>/click", methods=["POST"])
@@ -266,18 +300,29 @@ def api_servo_calibrate(servo_id: int):
     if err:
         return err
 
-    body = request.get_json(silent=True) or {}
-    stay  = body.get("stay")
-    click = body.get("click")
-    if stay is None or click is None:
-        return _err("field 'stay' dan 'click' diperlukan")
+    body      = request.get_json(silent=True) or {}
+    direction = body.get("dir")
+    speed     = body.get("speed")
+    click_ms  = body.get("click_ms")
+    return_ms = body.get("return_ms")
+    trim      = body.get("trim", 0)
 
-    result = _actuator.save_calibration(servo_id, int(stay), int(click))
+    if direction is None or speed is None or click_ms is None or return_ms is None:
+        return _err("field 'dir', 'speed', 'click_ms', 'return_ms' diperlukan")
+    if str(direction).upper() not in ("CW", "CCW"):
+        return _err("field 'dir' harus 'CW' atau 'CCW'")
+
+    result = _actuator.save_calibration(
+        servo_id, str(direction), int(speed),
+        int(click_ms), int(return_ms), int(trim)
+    )
     if result.get("ok"):
         push_command({
             "actuator": f"Servo {servo_id}",
-            "action":   f"Kalibrasi disimpan",
-            "reason":   f"stay={stay}°, click={click}°",
+            "action":   "Kalibrasi disimpan",
+            "reason":   f"dir={result.get('click_dir')}, speed={result.get('click_speed')}, "
+                        f"click_ms={result.get('click_ms')}, return_ms={result.get('return_ms')}, "
+                        f"trim={result.get('trim')}",
         })
         return jsonify(result)
     return jsonify(result), 400

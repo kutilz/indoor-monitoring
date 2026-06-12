@@ -17,9 +17,11 @@ class ActuatorClient:
         GET  /health
         GET  /sensor
         GET  /servo/config
-        POST /servo/move?id=<0-2>&angle=<0-180>
+        POST /servo/jog?id=<0-2>&dir=<CW|CCW>&speed=<0-100>
+        POST /servo/stop?id=<0-2>
+        POST /servo/stop_all
         POST /servo/click?id=<0-2>
-        POST /servo/calibrate?id=<0-2>&stay=<angle>&click=<angle>
+        POST /servo/calibrate?id=<0-2>&dir=<CW|CCW>&speed=<0-100>&click_ms=&return_ms=&trim=
         POST /relay?state=<ON|OFF>
     """
 
@@ -70,7 +72,7 @@ class ActuatorClient:
 
     def click_servo(self, servo_id: int) -> bool:
         """
-        Jalankan urutan klik servo dengan easing (sesuai kalibrasi tersimpan).
+        Jalankan urutan klik servo (jog ke arah & durasi sesuai kalibrasi tersimpan).
 
         Args:
             servo_id: 0 = Power, 1 = Temp Up, 2 = Temp Down
@@ -91,39 +93,75 @@ class ActuatorClient:
             self._online = False
             return False
 
-    def move_servo(self, servo_id: int, angle: int) -> bool:
+    def jog_servo(self, servo_id: int, direction: str, speed: int) -> bool:
         """
-        Gerakin servo ke sudut tertentu (untuk kalibrasi interaktif).
+        Putar servo continuous-rotation selama tombol jog ditahan (kalibrasi manual).
+        Harus dipanggil berulang (heartbeat) selama tombol ditahan — node akan
+        otomatis berhenti jika heartbeat berhenti masuk (safety watchdog).
 
         Args:
             servo_id: 0-2
-            angle: 0-180 derajat
+            direction: "CW" atau "CCW"
+            speed: 0-100 (0 = berhenti)
 
         Returns:
             True jika berhasil.
         """
         try:
             r = requests.post(
-                f"{self._base_url}/servo/move",
-                params={"id": servo_id, "angle": angle},
+                f"{self._base_url}/servo/jog",
+                params={"id": servo_id, "dir": direction.upper(), "speed": speed},
                 timeout=self._timeout
             )
             self._online = True
             return r.status_code == 200
         except Exception as e:
-            print(f"[Actuator] move_servo({servo_id}, {angle}) error: {e}")
+            print(f"[Actuator] jog_servo({servo_id}, {direction}, {speed}) error: {e}")
             self._online = False
             return False
 
-    def save_calibration(self, servo_id: int,
-                         stay_angle: int, click_angle: int) -> dict:
+    def stop_servo(self, servo_id: int) -> bool:
+        """Hentikan satu servo segera."""
+        try:
+            r = requests.post(
+                f"{self._base_url}/servo/stop",
+                params={"id": servo_id},
+                timeout=self._timeout
+            )
+            self._online = True
+            return r.status_code == 200
+        except Exception as e:
+            print(f"[Actuator] stop_servo({servo_id}) error: {e}")
+            self._online = False
+            return False
+
+    def stop_all_servos(self) -> bool:
+        """Hentikan semua servo segera (emergency stop)."""
+        try:
+            r = requests.post(
+                f"{self._base_url}/servo/stop_all",
+                timeout=self._timeout
+            )
+            self._online = True
+            return r.status_code == 200
+        except Exception as e:
+            print(f"[Actuator] stop_all_servos error: {e}")
+            self._online = False
+            return False
+
+    def save_calibration(self, servo_id: int, click_dir: str, click_speed: int,
+                         click_duration_ms: int, return_duration_ms: int,
+                         trim: int = 0) -> dict:
         """
         Simpan nilai kalibrasi servo ke LittleFS di node.
 
         Args:
             servo_id: 0-2
-            stay_angle: Sudut posisi diam (0-180)
-            click_angle: Sudut posisi klik (0-180); selisih dengan stay ≤ 120°
+            click_dir: "CW" atau "CCW" — arah putar yang menekan tombol AC
+            click_speed: 0-100
+            click_duration_ms: lama putar ke click_dir untuk menekan tombol
+            return_duration_ms: lama putar balik (arah berlawanan) untuk kembali
+            trim: -100..100 — koreksi titik "stop" (us, ditambahkan ke 1500)
 
         Returns:
             Response JSON dari node, atau {"ok": False} jika gagal.
@@ -133,8 +171,11 @@ class ActuatorClient:
                 f"{self._base_url}/servo/calibrate",
                 params={
                     "id": servo_id,
-                    "stay": stay_angle,
-                    "click": click_angle
+                    "dir": click_dir.upper(),
+                    "speed": click_speed,
+                    "click_ms": click_duration_ms,
+                    "return_ms": return_duration_ms,
+                    "trim": trim,
                 },
                 timeout=self._timeout
             )
